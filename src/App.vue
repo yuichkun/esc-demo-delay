@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { createDawInput, runtime } from '@suara/sdk'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { createDawInput, runtime, useTransport } from '@suara/sdk'
 import SuaraHostPanel from '@suara/sdk/helper/SuaraHostPanel.vue'
 
 // The DSP worklet, written in TypeScript and bundled by Vite. `?worker&url` hands
@@ -8,7 +8,8 @@ import SuaraHostPanel from '@suara/sdk/helper/SuaraHostPanel.vue'
 // wrapper-free so it loads straight into the AudioWorkletGlobalScope.
 import workletUrl from './audio/worklets/my-delay.ts?worker&url'
 
-const started = ref(false)
+const transport = useTransport()
+const playing = ref(false)
 
 let ctx: AudioContext | null = null
 let node: AudioWorkletNode | null = null
@@ -17,17 +18,27 @@ let moduleUrl = workletUrl
 
 async function buildGraph() {
   ctx = new AudioContext()
-  await ctx.resume()
   await ctx.audioWorklet.addModule(moduleUrl)
   node = new AudioWorkletNode(ctx, 'my-delay', {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
   })
-  // DAW input (VST) or the web DAW-simulator's virtual source → worklet → output.
+  // DAW input (VST) or the web DAW-simulator's source → worklet → output.
   const stream = await createDawInput()
   source = ctx.createMediaStreamSource(stream)
   source.connect(node).connect(ctx.destination)
+}
+
+async function play() {
+  if (!ctx) await buildGraph()
+  await ctx?.resume()
+  playing.value = true
+}
+
+async function stop() {
+  if (ctx && ctx.state === 'running') await ctx.suspend()
+  playing.value = false
 }
 
 async function teardown() {
@@ -37,52 +48,49 @@ async function teardown() {
   ctx = null
   node = null
   source = null
+  playing.value = false
 }
 
-async function start() {
-  if (started.value) return
-  await buildGraph()
-  started.value = true
-}
-
-// VST runtime has no user-gesture requirement, so start immediately there.
+// VST runtime: audio flows from the DAW continuously, so start on mount.
+// Web runtime: the DAW-simulator's transport (Play / Stop) drives playback.
 onMounted(() => {
-  if (runtime.isVst) void start()
+  if (runtime.isVst) void play()
 })
+watch(
+  () => transport.state.isPlaying,
+  (isPlaying) => {
+    if (runtime.isWeb) void (isPlaying ? play() : stop())
+  },
+)
 
 // HMR: rebuild the graph on a fresh AudioContext when the worklet's DSP changes
 // (a context can't re-register a processor name, so a new one is the clean way).
 if (import.meta.hot) {
   import.meta.hot.accept('./audio/worklets/my-delay.ts?worker&url', async (mod) => {
     const next = (mod as { default: string } | undefined)?.default
-    if (!next || !started.value) return
+    if (!next) return
     moduleUrl = next
+    const wasPlaying = playing.value
     await teardown()
-    await buildGraph()
+    if (wasPlaying) await play()
   })
 }
+
+onBeforeUnmount(teardown)
 </script>
 
 <template>
   <main
-    class="flex min-h-full flex-col items-center justify-center gap-6 bg-neutral-950 text-neutral-100"
+    class="flex min-h-full flex-col items-center justify-center gap-3 bg-neutral-950 text-neutral-100"
   >
-    <div class="text-center">
-      <h1 class="text-xl font-semibold tracking-tight">SuaraDevEffect</h1>
-      <p class="mt-1 text-sm text-neutral-400">runtime: {{ runtime.kind }} · in → my-delay → out</p>
-    </div>
+    <h1 class="text-xl font-semibold tracking-tight">SuaraDevEffect</h1>
+    <p class="text-sm text-neutral-400">runtime: {{ runtime.kind }} · in → my-delay → out</p>
+    <p class="text-sm" :class="playing ? 'text-emerald-400' : 'text-neutral-500'">
+      {{ playing ? '● playing' : '○ stopped' }}
+    </p>
+    <p v-if="runtime.isWeb" class="text-xs text-neutral-600">controls in the DAW simulator ↘</p>
 
-    <button
-      v-if="!started"
-      type="button"
-      class="rounded-lg bg-emerald-500 px-5 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400"
-      @click="start()"
-    >
-      Start audio
-    </button>
-    <p v-else class="text-sm text-emerald-400">running</p>
-
-    <!-- web runtime only: stands in for the DAW (MIDI / transport / audio input). -->
+    <!-- web runtime only: stands in for the DAW (transport / audio input / MIDI). -->
     <SuaraHostPanel v-if="runtime.isWeb" />
   </main>
 </template>

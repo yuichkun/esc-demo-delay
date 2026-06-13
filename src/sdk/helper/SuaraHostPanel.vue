@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { onUnmounted, ref } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { configureWebInput, createDawInput, useTransport } from '../index'
 import VirtualKeyboard from './VirtualKeyboard.vue'
 
-// web runtime だけ出る「DAW 代役」。普段は隠れていて floating トグルで開閉 (= 邪魔しない)。
-// MIDI (= virtual 鍵盤) / transport (= play・stop・tempo) / audio input (= test tone or file) を供給。
-// VST では DAW が供給するので mount されない。
+// web runtime の「DAW 代役」。VST では DAW が供給するので mount されない。
+// 操作モデルは 1 本: Play/Stop = transport の再生 = 実際に音が鳴る/止まる
+// (App が transport.isPlaying を見て graph を resume/suspend する)。
+// Input はその再生時に流れるソース、Level は再生中の入力レベル。
 
-const open = ref(false)
+const open = ref(true)
 const transport = useTransport()
 
+// --- 唯一の再生コントロール (= transport)。App 側の watcher が音を駆動する。 ---
 function togglePlay(): void {
   transport.setPlaying?.(!transport.state.isPlaying)
 }
@@ -17,23 +19,37 @@ function onTempo(e: Event): void {
   transport.setTempo?.(Number((e.target as HTMLInputElement).value))
 }
 
-// audio input = createDawInput() が web で MediaStream を返すことの実証 + level meter。
+// --- 入力ソース = Play 時に流れる音。再生中に変えても live で差し替わる。 ---
 type Src = 'tone' | 'file'
-const inputSrc = ref<Src>('tone')
+const source = ref<Src>('tone')
 const fileName = ref('')
-const inputOn = ref(false)
-const inputLevel = ref(0)
 const fileEl = ref<HTMLInputElement | null>(null)
 
-let currentFile: File | null = null
-let stream: MediaStream | null = null
+function selectTone(): void {
+  source.value = 'tone'
+  configureWebInput({ kind: 'tone' })
+}
+function pickFile(): void {
+  fileEl.value?.click()
+}
+function onFile(e: Event): void {
+  const f = (e.target as HTMLInputElement).files?.[0]
+  if (!f) return
+  fileName.value = f.name
+  source.value = 'file'
+  configureWebInput({ kind: 'file', file: f })
+}
+
+// --- レベルメーター: 再生中だけ走り、入力 bus をタップして表示する。 ---
+const level = ref(0)
 let meterCtx: AudioContext | null = null
 let raf = 0
 
-async function startInput(): Promise<void> {
-  stream = await createDawInput()
+async function startMeter(): Promise<void> {
+  if (meterCtx) return
   meterCtx = new AudioContext()
   await meterCtx.resume()
+  const stream = await createDawInput()
   const src = meterCtx.createMediaStreamSource(stream)
   const analyser = meterCtx.createAnalyser()
   analyser.fftSize = 256
@@ -43,53 +59,28 @@ async function startInput(): Promise<void> {
     analyser.getByteTimeDomainData(data)
     let peak = 0
     for (const v of data) peak = Math.max(peak, Math.abs(v - 128))
-    inputLevel.value = Math.min(1, peak / 128)
+    level.value = Math.min(1, peak / 128)
     raf = requestAnimationFrame(tick)
   }
   tick()
-  inputOn.value = true
 }
 
-function stopInput(): void {
+function stopMeter(): void {
   cancelAnimationFrame(raf)
-  stream?.getTracks().forEach((t) => t.stop())
   void meterCtx?.close()
-  stream = null
   meterCtx = null
-  inputLevel.value = 0
-  inputOn.value = false
+  level.value = 0
 }
 
-async function restartIfOn(): Promise<void> {
-  if (inputOn.value) {
-    stopInput()
-    await startInput()
-  }
-}
+watch(
+  () => transport.state.isPlaying,
+  (playing) => {
+    if (playing) void startMeter()
+    else stopMeter()
+  },
+)
 
-function selectTone(): void {
-  inputSrc.value = 'tone'
-  configureWebInput({ kind: 'tone' })
-  void restartIfOn()
-}
-function selectFile(): void {
-  fileEl.value?.click()
-}
-function onFile(e: Event): void {
-  const f = (e.target as HTMLInputElement).files?.[0]
-  if (!f) return
-  currentFile = f
-  fileName.value = f.name
-  inputSrc.value = 'file'
-  configureWebInput({ kind: 'file', file: f })
-  void restartIfOn()
-}
-function toggleInput(): void {
-  if (inputOn.value) stopInput()
-  else void startInput()
-}
-
-onUnmounted(stopInput)
+onUnmounted(stopMeter)
 </script>
 
 <template>
@@ -103,15 +94,11 @@ onUnmounted(stopInput)
             <span class="sub">web runtime</span>
           </div>
 
-          <div class="row">
-            <span class="row-label">MIDI</span>
-            <VirtualKeyboard />
-          </div>
-
-          <div class="row inline">
-            <span class="row-label">Transport</span>
-            <button class="ctl" :class="{ on: transport.state.isPlaying }" @click="togglePlay">
-              {{ transport.state.isPlaying ? 'stop' : 'play' }}
+          <!-- 一次操作: Play/Stop + tempo -->
+          <div class="transport">
+            <button class="play" :class="{ on: transport.state.isPlaying }" @click="togglePlay">
+              <span class="glyph">{{ transport.state.isPlaying ? '◼' : '▶' }}</span>
+              {{ transport.state.isPlaying ? 'Stop' : 'Play' }}
             </button>
             <label class="tempo">
               <input
@@ -125,20 +112,30 @@ onUnmounted(stopInput)
             </label>
           </div>
 
-          <div class="row inline">
-            <span class="row-label">Audio in</span>
+          <!-- 入力ソース -->
+          <div class="row">
+            <span class="row-label">Input</span>
             <div class="seg">
-              <button :class="{ on: inputSrc === 'tone' }" @click="selectTone">tone</button>
-              <button :class="{ on: inputSrc === 'file' }" @click="selectFile">file</button>
-            </div>
-            <span v-if="inputSrc === 'file' && fileName" class="fname mono">{{ fileName }}</span>
-            <button class="ctl power" :class="{ on: inputOn }" @click="toggleInput">
-              {{ inputOn ? 'on' : 'off' }}
-            </button>
-            <div class="meter">
-              <div class="meter-fill" :style="{ width: inputLevel * 100 + '%' }"></div>
+              <button :class="{ on: source === 'tone' }" @click="selectTone">test tone</button>
+              <button :class="{ on: source === 'file' }" @click="pickFile">
+                {{ source === 'file' && fileName ? fileName : 'audio file…' }}
+              </button>
             </div>
             <input ref="fileEl" type="file" accept="audio/*" hidden @change="onFile" />
+          </div>
+
+          <!-- 入力レベル -->
+          <div class="row">
+            <span class="row-label">Level</span>
+            <div class="meter">
+              <div class="meter-fill" :style="{ width: level * 100 + '%' }"></div>
+            </div>
+          </div>
+
+          <!-- MIDI -->
+          <div class="row col">
+            <span class="row-label">MIDI</span>
+            <VirtualKeyboard />
           </div>
         </section>
       </Transition>
@@ -232,7 +229,7 @@ onUnmounted(stopInput)
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.1rem;
 }
 
 .sheet-enter-active,
@@ -270,74 +267,60 @@ onUnmounted(stopInput)
   color: var(--muted);
 }
 
+/* primary transport */
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+.play {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #0d0d0d;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  padding: 0.6rem 1.3rem;
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.play:hover {
+  filter: brightness(1.08);
+}
+.play.on {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.play .glyph {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
 .row {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.row.inline {
-  flex-direction: row;
   align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+.row.col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
 }
 .row-label {
   font-size: 0.66rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
-  min-width: 4.2rem;
+  min-width: 3.4rem;
 }
 
 .mono {
   font-variant-numeric: tabular-nums;
-}
-
-.ctl {
-  font: inherit;
-  font-size: 0.78rem;
-  color: var(--fg);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0.28rem 0.7rem;
-  cursor: pointer;
-}
-.ctl.on {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-.power {
-  min-width: 2.6rem;
-}
-
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.seg button {
-  font: inherit;
-  font-size: 0.76rem;
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  padding: 0.28rem 0.7rem;
-  cursor: pointer;
-}
-.seg button.on {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.fname {
-  font-size: 0.72rem;
-  color: var(--muted);
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tempo {
@@ -348,10 +331,34 @@ onUnmounted(stopInput)
   color: var(--muted);
 }
 
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  flex: 1;
+}
+.seg button {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seg button.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .meter {
   flex: 1;
-  min-width: 60px;
-  height: 6px;
+  height: 7px;
   background: var(--line);
   border-radius: 999px;
   overflow: hidden;
