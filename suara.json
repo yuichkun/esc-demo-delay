@@ -1,0 +1,11 @@
+{
+  "mode": "dev",
+  "devUrl": "http://localhost:45679",
+  "assets": "www",
+  "name": "SuaraDevEffect",
+  "type": "effect",
+  "category": "Fx|Distortion",
+  "page": "",
+  "processorUuid": "ED1F0E6D02534EA5AFB32A0FE096163C",
+  "controllerUuid": "A61A2808290149AEBC8C54B6DC85F2A8"
+}

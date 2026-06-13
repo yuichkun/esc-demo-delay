@@ -14,6 +14,10 @@ dist-ssr
 coverage
 *.local
 
+# Suara plugin build output
+release
+www
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

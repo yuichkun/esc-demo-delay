@@ -1,5 +1,16 @@
 @import 'tailwindcss';
 
+/* Design tokens the Suara helper UI (SuaraHostPanel / VirtualKeyboard) reads.
+   They Teleport to <body>, so the tokens live on :root rather than a component. */
+:root {
+  --bg: #0d0d0d;
+  --surface: #161616;
+  --line: #262626;
+  --fg: #f4f4f4;
+  --muted: #6e6e6e;
+  --accent: #fe5000;
+}
+
 html,
 body,
 #app {

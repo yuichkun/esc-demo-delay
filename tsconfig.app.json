@@ -4,12 +4,11 @@
   // AudioWorklet processors compile under tsconfig.worklet.json (no DOM lib).
   "exclude": ["src/audio/worklets/**/*"],
   "compilerOptions": {
-    // Extra safety for array and object lookups, but may have false positives.
-    "noUncheckedIndexedAccess": true,
-
-    // Path mapping for cleaner imports.
+    // Path mapping for cleaner imports. @suara/sdk → the SDK vendored in src/sdk.
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@suara/sdk": ["./src/sdk/index.ts"],
+      "@suara/sdk/*": ["./src/sdk/*"]
     },
 
     // `vue-tsc --build` produces a .tsbuildinfo file for incremental type-checking.
