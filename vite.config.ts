@@ -10,6 +10,25 @@ import tailwindcss from '@tailwindcss/vite'
 const manifest = JSON.parse(readFileSync(new URL('./suara.json', import.meta.url), 'utf8'))
 const devPort = Number(new URL(manifest.devUrl).port)
 
+// worklet (src/audio/worklets/ 配下) を編集したら HMR せず window ごと full-reload する
+// 即席プラグイン。worklet の HMR は AudioContext を作り直す必要があって複雑なので、
+// まるごと reload に倒してシンプルに保つ。
+interface WorkletReloadCtx {
+  file: string
+  server: { ws: { send: (payload: { type: 'full-reload' }) => void } }
+}
+function workletFullReload() {
+  return {
+    name: 'worklet-full-reload',
+    handleHotUpdate(ctx: WorkletReloadCtx) {
+      if (ctx.file.includes('/audio/worklets/')) {
+        ctx.server.ws.send({ type: 'full-reload' })
+        return [] // 既定の HMR はスキップ
+      }
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   staged: {
@@ -24,7 +43,7 @@ export default defineConfig({
     semi: false,
     singleQuote: true,
   },
-  plugins: [vue(), vueDevTools(), tailwindcss()],
+  plugins: [vue(), vueDevTools(), tailwindcss(), workletFullReload()],
   // AudioWorklet processors are imported with `?worker&url`. Bundling them as ES
   // modules keeps the output wrapper-free so addModule() can load it directly.
   worker: {

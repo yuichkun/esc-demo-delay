@@ -11,11 +11,15 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
     const output = outputs[0]
     if (!input || !output) return true
 
-    for (let ch = 0; ch < output.length; ch++) {
-      const inCh = input[ch]
-      const outCh = output[ch]
-      if (inCh && outCh) outCh.set(inCh)
+    for (let ch_i = 0; ch_i < 2; ch_i++) {
+      const leftInputCh = input[ch_i]
+      const outputChannel = output[ch_i]
+
+      for (let i = 0; i < 128; i++) {
+        outputChannel[i] = leftInputCh[i]
+      }
     }
+
     return true
   }
 }

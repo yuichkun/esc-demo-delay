@@ -111,8 +111,8 @@ async function wireSource(g: BusGraph, src: WebInputSource, bus: Bus): Promise<v
     g.nodes = buildPulse(ctx, g.dest)
   } else {
     const osc = ctx.createOscillator()
-    osc.type = 'sawtooth'
-    osc.frequency.value = 110
+    osc.type = 'sine'
+    osc.frequency.value = 220
     osc.connect(g.dest)
     osc.start()
     g.nodes = [osc]
