@@ -11,6 +11,7 @@ import workletUrl from './audio/worklets/my-delay.ts?worker&url'
 const transport = useTransport()
 const playing = ref(false)
 const mix = ref(0)
+const delayTime = ref(0.5)
 
 let ctx: AudioContext | null = null
 let myDelayNode: AudioWorkletNode | null = null
@@ -71,6 +72,13 @@ watch(mix, () => {
   nodeMixParam.value = mix.value
 })
 
+watch(delayTime, () => {
+  if (!myDelayNode) return
+  const nodeDelayTimeParam = myDelayNode.parameters.get('delayTime')
+  if (!nodeDelayTimeParam) throw new Error('delayTime param is not defined')
+  nodeDelayTimeParam.value = delayTime.value
+})
+
 onBeforeUnmount(teardown)
 </script>
 
@@ -83,6 +91,11 @@ onBeforeUnmount(teardown)
     <div>
       mix: {{ mix }}
       <input type="range" min="0" max="1" step="0.1" v-model="mix" />
+    </div>
+
+    <div>
+      delay: {{ delayTime }}s
+      <input type="range" min="0" max="2" step="0.01" v-model="delayTime" />
     </div>
 
     <!-- Web用Debug UI -->
