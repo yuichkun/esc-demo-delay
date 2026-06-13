@@ -1,48 +1,57 @@
 # esc-demo-delay
 
-This template should help get you started developing with Vue 3 in Vite.
+Foundation for a Vue 3 app that runs audio DSP in an
+[`AudioWorklet`](https://developer.mozilla.org/docs/Web/API/AudioWorklet) — worklet written
+in TypeScript, bundled by Vite, hot-reloaded in dev, styled with Tailwind CSS v4.
 
-## Recommended IDE Setup
+Built on [Vite+](https://viteplus.dev/) — use the `vp` CLI, not `npm`/`pnpm`.
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## Commands
 
 ```sh
-pnpm install
+vp install   # install dependencies
+vp dev       # start the dev server (with worklet HMR)
+vp build     # type-check + production build
+vp check     # format + lint + typecheck
 ```
 
-### Compile and Hot-Reload for Development
+## What's wired up
 
-```sh
-pnpm dev
+The processor lives in `src/audio/worklets/delay-processor.ts` (a passthrough stub — drop
+your DSP in there) and runs on the audio thread inside the `AudioWorkletGlobalScope`.
+
+- **TypeScript worklets.** The processor is plain TypeScript. Its globals
+  (`registerProcessor`, `AudioWorkletProcessor`) come from `@types/audioworklet`, scoped to
+  `tsconfig.worklet.json` (which leaves out the DOM lib so it can't clash with app code).
+  `tsconfig.app.json` excludes the worklet folder, so each side type-checks against the
+  right globals.
+
+- **`?worker&url` import.** `src/audio/useDelay.ts` loads it with Vite's query suffix:
+
+  ```ts
+  import processorUrl from './worklets/delay-processor.ts?worker&url'
+  await ctx.audioWorklet.addModule(processorUrl)
+  ```
+
+  `?worker&url` makes Vite bundle the TypeScript into a standalone module and return its
+  URL. `worker.format: 'es'` in `vite.config.ts` keeps that bundle wrapper-free so it loads
+  cleanly via `addModule()`.
+
+- **HMR.** Editing the processor fires `import.meta.hot.accept` in `useDelay.ts`, which
+  rebuilds the graph on a fresh `AudioContext` (a context can't re-register a processor
+  name, so a new one is the clean way to pick up edited DSP).
+
+- **Tailwind v4** via `@tailwindcss/vite`, entry at `src/assets/main.css`.
+
+## Layout
+
 ```
-
-### Type-Check, Compile and Minify for Production
-
-```sh
-pnpm build
-```
-
-### Run Unit Tests with [Vitest](https://vitest.dev/)
-
-```sh
-pnpm test:unit
+src/
+  audio/
+    useDelay.ts                 # composable: load worklet, HMR, teardown
+    worklets/
+      delay-processor.ts        # the AudioWorkletProcessor (audio thread)
+  assets/main.css               # Tailwind entry
+  App.vue                       # UI (Tailwind)
+  main.ts                       # app entry
 ```

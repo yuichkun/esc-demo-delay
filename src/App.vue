@@ -1,47 +1,20 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
-import TheWelcome from './components/TheWelcome.vue'
+import { useDelay } from '@/audio/useDelay'
+
+const { isReady, init } = useDelay()
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="./assets/logo.svg" width="125" height="125" />
-
-    <div class="wrapper">
-      <HelloWorld msg="You did it!" />
+  <main class="flex min-h-full items-center justify-center bg-neutral-950 text-neutral-100">
+    <div class="space-y-4 text-center">
+      <h1 class="text-xl font-semibold tracking-tight">esc-demo-delay</h1>
+      <button
+        type="button"
+        class="rounded-lg bg-emerald-500 px-5 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400"
+        @click="init()"
+      >
+        {{ isReady ? 'Audio ready' : 'Start audio' }}
+      </button>
     </div>
-  </header>
-
-  <main>
-    <TheWelcome />
   </main>
 </template>
-
-<style scoped>
-header {
-  line-height: 1.5;
-}
-
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
-}
-</style>
