@@ -1,12 +1,12 @@
-// my-delay — a simple feed-forward delay line, registered as 'my-delay'.
+// my-delay — a feedback delay line, registered as 'my-delay'.
 //
 // Runs on the audio rendering thread. Globals (AudioWorkletProcessor,
 // registerProcessor) come from @types/audioworklet via tsconfig.worklet.json.
 // Bundled by Vite through `?worker&url` and loaded with addModule().
 //
-// Dry input is written into a ring buffer; for each sample the read position is
-// `delayTime` seconds behind the write position, so reads yield the delayed signal.
-// `mix` crossfades dry against the delayed signal.
+// Per sample: read the signal `delayTime` seconds behind the write head, write
+// `dry + feedback * delayed` back into the ring buffer (so echoes repeat and
+// decay), and output `dry` crossfaded with the delayed signal by `mix`.
 
 const BUFFER_SIZE = 128
 const MAX_DELAY_SECONDS = 2
@@ -32,6 +32,13 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
         automationRate: 'k-rate', // ブロック毎で十分
       },
       {
+        name: 'feedback', // 書き戻し量（0..0.95、1未満で発散を防ぐ）
+        defaultValue: 0,
+        minValue: 0,
+        maxValue: 0.95,
+        automationRate: 'k-rate',
+      },
+      {
         name: 'mix', // dry / wet
         defaultValue: 0,
         minValue: 0.0,
@@ -39,21 +46,6 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
         automationRate: 'a-rate',
       },
     ]
-  }
-
-  storeDrySignals(input: Float32Array<ArrayBufferLike>[]) {
-    // inputをbufferに入れる
-    const leftChannel = input[0]
-    for (let i = 0; i < BUFFER_SIZE; i++) {
-      this.buffer[this.writeIndex] = leftChannel[i]
-
-      // bufferの最後の要素の時
-      if (this.writeIndex >= this.bufferLength - 1) {
-        this.writeIndex = 0
-      } else {
-        this.writeIndex++
-      }
-    }
   }
 
   process(
@@ -68,24 +60,25 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
     if (!leftInputCh) return true
 
     const mixParam = parameters.mix
-    const delayParam = parameters.delayTime
+    const feedback = parameters.feedback[0]
     // delayTime(秒) → サンプル数。bufferを超えないようにクランプ。
     const delaySamples = Math.min(
       this.bufferLength - 1,
-      Math.max(0, Math.round(delayParam[0] * sampleRate)),
+      Math.max(0, Math.round(parameters.delayTime[0] * sampleRate)),
     )
-
-    // storeDrySignalsがwriteIndexを1ブロック進めるので、読み出しの基準として
-    // ブロック先頭のwriteIndexを控えておく。
-    const writeStart = this.writeIndex
-    this.storeDrySignals(input)
 
     for (let i = 0; i < BUFFER_SIZE; i++) {
       const mix = mixParam.length > 1 ? mixParam[i] : mixParam[0]
-
       const drySignal = leftInputCh[i]
-      const readIndex = (writeStart + i - delaySamples + this.bufferLength) % this.bufferLength
+
+      // delaySamplesぶん後ろを読む
+      const readIndex = (this.writeIndex - delaySamples + this.bufferLength) % this.bufferLength
       const wetSignal = this.buffer[readIndex]
+
+      // dry + フィードバックした遅延信号を書き戻す（= エコーが減衰しながら繰り返す）
+      this.buffer[this.writeIndex] = drySignal + wetSignal * feedback
+      this.writeIndex = this.writeIndex >= this.bufferLength - 1 ? 0 : this.writeIndex + 1
+
       for (let ch_i = 0; ch_i < 2; ch_i++) {
         const outputChannel = output[ch_i]
         outputChannel[i] = drySignal * (1 - mix) + wetSignal * mix

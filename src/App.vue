@@ -12,6 +12,7 @@ const transport = useTransport()
 const playing = ref(false)
 const mix = ref(0)
 const delayTime = ref(0.5)
+const feedback = ref(0)
 
 let ctx: AudioContext | null = null
 let myDelayNode: AudioWorkletNode | null = null
@@ -79,6 +80,13 @@ watch(delayTime, () => {
   nodeDelayTimeParam.value = delayTime.value
 })
 
+watch(feedback, () => {
+  if (!myDelayNode) return
+  const nodeFeedbackParam = myDelayNode.parameters.get('feedback')
+  if (!nodeFeedbackParam) throw new Error('feedback param is not defined')
+  nodeFeedbackParam.value = feedback.value
+})
+
 onBeforeUnmount(teardown)
 </script>
 
@@ -96,6 +104,11 @@ onBeforeUnmount(teardown)
     <div>
       delay: {{ delayTime }}s
       <input type="range" min="0" max="2" step="0.01" v-model="delayTime" />
+    </div>
+
+    <div>
+      feedback: {{ feedback }}
+      <input type="range" min="0" max="0.95" step="0.01" v-model="feedback" />
     </div>
 
     <!-- Web用Debug UI -->
