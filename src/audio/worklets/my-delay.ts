@@ -1,9 +1,12 @@
-// DSP worklet — runs on the audio rendering thread, registered as 'my-delay'.
+// my-delay — a simple feed-forward delay line, registered as 'my-delay'.
 //
-// Globals (AudioWorkletProcessor, registerProcessor) come from @types/audioworklet
-// via tsconfig.worklet.json. Bundled by Vite through `?worker&url` and loaded with
-// addModule(). The class body below is a bare passthrough so the audio graph is
-// wired end to end — replace it with your DSP.
+// Runs on the audio rendering thread. Globals (AudioWorkletProcessor,
+// registerProcessor) come from @types/audioworklet via tsconfig.worklet.json.
+// Bundled by Vite through `?worker&url` and loaded with addModule().
+//
+// Dry input is written into a ring buffer; the read head trails the write head by
+// `delayTimeInSamples`, so reads yield the signal delayed by that many samples.
+// `mix` crossfades dry against the delayed signal.
 
 const BUFFER_SIZE = 128
 
@@ -16,6 +19,8 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
   constructor() {
     super()
     this.buffer = new Float32Array(this.bufferLength)
+    // 読み出しヘッドを書き込みヘッドの delayTimeInSamples ぶん後ろに置く (= 遅延量)。
+    this.readIndex = this.bufferLength - this.delayTimeInSamples
   }
 
   static get parameterDescriptors() {
@@ -57,6 +62,7 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
     const output = outputs[0]
     if (!input || !output) return true
     const leftInputCh = input[0]
+    if (!leftInputCh) return true
     const mixParam = parameters.mix
 
     this.storeDrySignals(input)
@@ -65,7 +71,7 @@ class MyDelay extends AudioWorkletProcessor implements AudioWorkletProcessorImpl
       const mix = mixParam.length > 1 ? mixParam[i] : mixParam[0]
 
       const drySignal = leftInputCh[i]
-      const wetSignal = Math.random()
+      const wetSignal = this.readBuffer()
       for (let ch_i = 0; ch_i < 2; ch_i++) {
         const outputChannel = output[ch_i]
         outputChannel[i] = drySignal * (1 - mix) + wetSignal * mix
